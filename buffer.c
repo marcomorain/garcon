@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include "buffer.h"
@@ -169,6 +170,22 @@ buffer_append_n(buffer_t *self, const char *str, size_t len) {
   strncat(self->data, str, len);
 
   return 0;
+}
+
+int buffer_appendf(buffer_t* self, const char * restrict format, ...) {
+  char* string = 0;
+  va_list list;
+  va_start(list, format);
+  int count = vasprintf(&string, format, list);
+  va_end(list);
+
+  if (count < 0) {
+    return -1;
+  }
+
+  const int result = buffer_append_n(self, string, count);
+  free(string);
+  return result;
 }
 
 /*

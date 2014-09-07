@@ -13,7 +13,7 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <fcntl.h>
-
+#include <sys/stat.h>
 #include "http_parser.h"
 #include "buffer.h"
 
@@ -29,22 +29,50 @@ static int on_url(http_parser* parser, const char *at, size_t len)
   return 0;
 }
 
+static buffer_t* response_headers(int length, int max_age) {
+  buffer_t* result = buffer_new();
+  buffer_append(result, "HTTP/1.1 200 OK");
+
+//< Date: Sun, 07 Sep 2014 14:51:17 GMT
+//< Last-Modified: Sun, 07 Sep 2014 01:37:26 GMT
+//      return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
+
+//< Content-Type: image/gif
+  max_age = 31536000;
+  buffer_appendf(result, "cache-control: public, max-age=%d", max_age);
+
+  // Content-Length: 459211
+  buffer_appendf(result, "Content-Length: %d", length);
+
+  
+
+  buffer_append(result, "Access-Control-Allow-Methods: GET");
+  buffer_append(result, "Access-Control-Allow-Origin: *");
+  buffer_append(result, "Server: Garcon 1.0");
+}
+
 static void send_file(int socket, const char* root, const char* filename) {
 
 
   buffer_t* buffer = buffer_new();
   buffer_append(buffer, root);
   buffer_append(buffer, filename);
-
   int file = open(buffer->data, O_RDONLY);
+  buffer_free(buffer);
   if (file <= 0) {
     fprintf(stderr, "Cannot open %s\n", filename);
     return;
   }
 
-  // Whole file
-  off_t length = 0; 
-  int result = sendfile(file, socket, 0, &length, 0, 0);
+  struct stat stat;
+  int stat_res = fstat(file, &stat);
+  assert(stat_res == 0);
+  // TODO max age
+  buffer_t* headers = response_headers(stat.st_size, 0);
+
+  write(socket, headers->data, buffer_length(buffer));
+  
+  int result = sendfile(file, socket, 0, &(stat.st_size), 0, 0);
 
   if (result == -1) {
     return;

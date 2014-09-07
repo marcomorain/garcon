@@ -62,6 +62,9 @@ int
 buffer_append_n(buffer_t *self, const char *str, size_t len);
 
 int
+buffer_appendf(buffer_t* self, const char * restrict format, ...);
+
+int
 buffer_equals(buffer_t *self, buffer_t *other);
 
 ssize_t
