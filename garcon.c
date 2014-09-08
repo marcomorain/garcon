@@ -8,13 +8,27 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <time.h>
 #include <unistd.h>
 #include "buffer.h"
 #include "http_parser.h"
 
 struct parser_data {
-    buffer_t *url;
+    buffer_t* url;
+    buffer_t* user_agent;
+    int reading_user_agent;
 };
+
+void parser_data_init(struct parser_data* data) {
+    data->url        = buffer_new();
+    data->user_agent = buffer_new();
+    data->reading_user_agent = 0;
+}
+
+void parser_data_destroy(struct parser_data* data) {
+    buffer_free(data->url);
+    buffer_free(data->user_agent);
+}
 
 static void version(FILE* file) {
     const unsigned long version = http_parser_version();
@@ -25,21 +39,24 @@ static void version(FILE* file) {
 }
 
 static int on_header_value(http_parser * parser, const char *at, size_t len) {
-    (void)parser;
-    for (size_t i=0; i<len; i++) {
-        putchar(at[i]);
+    struct parser_data *data = parser->data;
+    if (data->reading_user_agent) {
+        buffer_append_n(data->user_agent, at, len);
     }
-    puts("");
     return 0;
 }
 
 static int on_header_field(http_parser * parser, const char *at, size_t len) {
-    (void)parser;
-    return on_header_value(parser, at, len);
+    struct parser_data *data = parser->data;
+    if (strncmp(at, "User-Agent", len) == 0) {
+        data->reading_user_agent = 1;
+    } else {
+        data->reading_user_agent = 0;
+    }
+    return 0;
 }
 
-static int on_url(http_parser * parser, const char *at, size_t len)
-{
+static int on_url(http_parser * parser, const char *at, size_t len) {
     struct parser_data *data = parser->data;
     buffer_append_n(data->url, at, len);
     return 0;
@@ -50,11 +67,29 @@ static buffer_t* response_headers(int length, int max_age)
     buffer_t *result = buffer_new();
     buffer_append(result, "HTTP/1.1 200 OK\r\n");
 
-    // <Date: Sun, 07 Sep 2014 14: 51:17 GMT
-    // <Last - Modified: Sun, 07 Sep 2014 01: 37:26 GMT
-    // return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
+    enum {
+        time_buffer_size = 100
+    };
+    char time_buffer[time_buffer_size];
 
-    // <Content - Type:image / gif
+    time_t rawtime;
+    time(&rawtime);
+    struct tm timeinfo;
+    gmtime_r(&rawtime, &timeinfo);
+    const size_t time_size = strftime(time_buffer, time_buffer_size, "%a, %d %h %Y %T %Z", &timeinfo);
+
+    if (time_size == 0) {
+        fprintf(stderr, "Error formatting time");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Date: Sun, 07 Sep 2014 14: 51:17 GMT
+    buffer_appendf(result, "Date: %s\r\n", time_buffer);
+    
+    // TODO:
+    // Last-Modified: Sun, 07 Sep 2014 01: 37:26 GMT
+    // Content-Type:image / gif
+
     max_age = 31536000;
     buffer_appendf(result, "cache-control: public, max-age=%d\r\n", max_age);
 
@@ -68,8 +103,9 @@ static buffer_t* response_headers(int length, int max_age)
     return result;
 }
 
-static void send_file(int socket, const char *root, const char *filename)
+static void send_file(int socket, const char *root, const char *filename, const char* user_agent)
 {
+    printf("The user agent: %s\n", user_agent);
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
     buffer_append(buffer, filename);
@@ -77,6 +113,7 @@ static void send_file(int socket, const char *root, const char *filename)
     buffer_free(buffer);
     if (file <= 0) {
         fprintf(stderr, "Cannot open %s\n", filename);
+        // TODO: 404
         return;
     }
     struct stat stat;
@@ -102,7 +139,7 @@ static void send_file(int socket, const char *root, const char *filename)
         return;
     }
 
-// 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
+    // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
 
     printf("<client ip> - - [time] <GET> %s 200\n", filename);
     close(file);
@@ -158,7 +195,6 @@ int main(int argc, char **argv)
     settings.on_header_value = on_header_value;
     settings.on_header_field = on_header_field;
 
-
     while (1) {
         if (listen(socket, 10) < 0) {
             perror("server: listen");
@@ -182,7 +218,7 @@ int main(int argc, char **argv)
             /* Handle error. */
         }
         struct parser_data data;
-        data.url = buffer_new();
+        parser_data_init(&data);
 
         http_parser *parser = malloc(sizeof(http_parser));
         http_parser_init(parser, HTTP_REQUEST);
@@ -202,10 +238,10 @@ int main(int argc, char **argv)
             /* Handle error. Usually just close the connection. */
         }
         const char *path = data.url->data;
-        send_file(new_socket, root, path);
+        send_file(new_socket, root, path, data.user_agent->data);
 
+        parser_data_destroy(&data);
         free(parser);
-        buffer_free(data.url);
         shutdown(new_socket, SHUT_RDWR);
         close(new_socket);
     }
