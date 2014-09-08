@@ -1,21 +1,16 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
+#include <assert.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
-#include <assert.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/uio.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include "http_parser.h"
+#include <unistd.h>
 #include "buffer.h"
+#include "http_parser.h"
 
 struct parser_data {
   buffer_t* url;
@@ -49,6 +44,8 @@ static buffer_t* response_headers(int length, int max_age) {
   buffer_append(result, "Access-Control-Allow-Methods: GET");
   buffer_append(result, "Access-Control-Allow-Origin: *");
   buffer_append(result, "Server: Garcon 1.0");
+
+  return result;
 }
 
 static void send_file(int socket, const char* root, const char* filename) {
@@ -70,7 +67,11 @@ static void send_file(int socket, const char* root, const char* filename) {
   // TODO max age
   buffer_t* headers = response_headers(stat.st_size, 0);
 
+  puts("headers:");
+  puts(headers->data);
   write(socket, headers->data, buffer_length(buffer));
+
+  buffer_free(headers);
   
   int result = sendfile(file, socket, 0, &(stat.st_size), 0, 0);
 
