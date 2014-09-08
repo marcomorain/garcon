@@ -13,176 +13,203 @@
 #include "http_parser.h"
 
 struct parser_data {
-	buffer_t *url;
+    buffer_t *url;
 };
+
+static void version(FILE* file) {
+    const unsigned long version = http_parser_version();
+    const unsigned major = (version >> 16) & 255;
+    const unsigned minor = (version >> 8) & 255;
+    const unsigned patch = version & 255;
+    fprintf(file, "http_parser v%u.%u.%u\n", major, minor, patch);
+}
+
+static int on_header_value(http_parser * parser, const char *at, size_t len) {
+    (void)parser;
+    for (size_t i=0; i<len; i++) {
+        putchar(at[i]);
+    }
+    puts("");
+    return 0;
+}
+
+static int on_header_field(http_parser * parser, const char *at, size_t len) {
+    (void)parser;
+    return on_header_value(parser, at, len);
+}
 
 static int on_url(http_parser * parser, const char *at, size_t len)
 {
-	struct parser_data *data = parser->data;
-	buffer_append_n(data->url, at, len);
-	printf("Append %zu bytes to URL\n", len);
-	return 0;
+    struct parser_data *data = parser->data;
+    buffer_append_n(data->url, at, len);
+    return 0;
 }
 
-static buffer_t *
- response_headers(int length, int max_age)
+static buffer_t* response_headers(int length, int max_age)
 {
-	buffer_t *result = buffer_new();
-	buffer_append(result, "HTTP/1.1 200 OK\n");
+    buffer_t *result = buffer_new();
+    buffer_append(result, "HTTP/1.1 200 OK\r\n");
 
-  // <Date: Sun, 07 Sep 2014 14: 51:17 GMT
-  // <Last - Modified: Sun, 07 Sep 2014 01: 37:26 GMT
-	// return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
+    // <Date: Sun, 07 Sep 2014 14: 51:17 GMT
+    // <Last - Modified: Sun, 07 Sep 2014 01: 37:26 GMT
+    // return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
 
-  // <Content - Type:image / gif
-	max_age = 31536000;
-	buffer_appendf(result, "cache-control: public, max-age=%d\n", max_age);
+    // <Content - Type:image / gif
+    max_age = 31536000;
+    buffer_appendf(result, "cache-control: public, max-age=%d\r\n", max_age);
 
-  // Content - Length:459211
-	buffer_appendf(result, "Content-Length: %d\n", length);
-	buffer_append(result, "Access-Control-Allow-Methods: GET\n");
-	buffer_append(result, "Access-Control-Allow-Origin: *\n");
-	buffer_append(result, "Server: Garcon 1.0\n");
+    // Content - Length:459211
+    buffer_appendf(result, "Content-Length: %d\r\n", length);
+    buffer_append(result, "Access-Control-Allow-Methods: GET\r\n");
+    buffer_append(result, "Access-Control-Allow-Origin: *\r\n");
+    buffer_append(result, "Server: Garcon 1.0\r\n");
+    buffer_append(result, "\r\n");
 
-	return result;
+    return result;
 }
 
 static void send_file(int socket, const char *root, const char *filename)
 {
+    buffer_t *buffer = buffer_new();
+    buffer_append(buffer, root);
+    buffer_append(buffer, filename);
+    int file = open(buffer->data, O_RDONLY);
+    buffer_free(buffer);
+    if (file <= 0) {
+        fprintf(stderr, "Cannot open %s\n", filename);
+        return;
+    }
+    struct stat stat;
+    int stat_res = fstat(file, &stat);
+    assert(stat_res == 0);
+    // TODO max age
+    buffer_t * headers = response_headers(stat.st_size, 0);
 
+    write(socket, headers->data, buffer_length(headers));
 
-	buffer_t *buffer = buffer_new();
-	buffer_append(buffer, root);
-	buffer_append(buffer, filename);
-	int file = open(buffer->data, O_RDONLY);
-	buffer_free(buffer);
-	if (file <= 0) {
-		fprintf(stderr, "Cannot open %s\n", filename);
-		return;
-	}
-	struct stat stat;
-	int stat_res = fstat(file, &stat);
-	assert(stat_res == 0);
-	// TODO max age
-	buffer_t * headers = response_headers(stat.st_size, 0);
+    buffer_free(headers);
 
-	puts("headers:");
-	puts(headers->data);
-	write(socket, headers->data, buffer_length(buffer));
+    off_t file_length = stat.st_size;
 
-	buffer_free(headers);
+    int result = sendfile(file, socket, 0, &file_length, 0, 0);
 
-	int result = sendfile(file, socket, 0, &(stat.st_size), 0, 0);
+    if (file_length != stat.st_size) {
+        printf("sendfile data length error\n");
+    }
 
-	if (result == -1) {
-		return;
-	}
-	close(file);
+    if (result == -1) {
+        perror("sendfile");
+        return;
+    }
+
+// 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
+
+    printf("<client ip> - - [time] <GET> %s 200\n", filename);
+    close(file);
 }
 
 int open_connection(uint16_t port, struct sockaddr_in* address)
 {
-  printf("Listening on %d\n", port);
+    const int create_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (create_socket < 1) {
+        perror("opening socket\n");
+        exit(EXIT_FAILURE);
+    }
 
-  const int create_socket = socket(AF_INET, SOCK_STREAM, 0);
-  if (create_socket < 1) {
-    perror("opening socket\n");
-    exit(EXIT_FAILURE);
-  }
+    address->sin_family = AF_INET;
+    address->sin_addr.s_addr = INADDR_ANY;
+    address->sin_port = htons(port);
 
-  address->sin_family = AF_INET;
-  address->sin_addr.s_addr = INADDR_ANY;
-  address->sin_port = htons(port);
+    const int yes = 1;
+    if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
 
-  const int yes = 1;
-  if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-    perror("setsockopt");
-    exit(EXIT_FAILURE);
-  }
+    const int bound = bind(create_socket, (struct sockaddr *)address, sizeof(*address));
 
-  const int bound = bind(create_socket, (struct sockaddr *)address, sizeof(*address));
+    if (bound != 0) {
+        fprintf(stderr, "Failed to bind to port %d", port);
+        perror(" ");
+        exit(EXIT_FAILURE);
+    }
 
-  if (bound != 0) {
-    perror("bind failed");
-    exit(EXIT_FAILURE);
-  }
-
-  return create_socket;
+    return create_socket;
 }
 
 int main(int argc, char **argv)
 {
+    (void)argc;
+    (void)argv;
 
-	(void)argc;
-	(void)argv;
-	puts("Garçon!");
+    const uint16_t port = 8888;
 
-  struct sockaddr_in address;
+    const char *root = getcwd(0, 0);
+    printf("Garçon! Serving content from %s on port %d\n", root, port);
+    version(stdout);
+    
+    struct sockaddr_in address;
+    
+    const int socket = open_connection(port, &address);
 
-	const uint16_t port = 8888;
-
-  const int socket = open_connection(port, &address);
-
-	const char *root = getcwd(0, 0);
-	printf("Serving content from %s\n", root);
-
+    http_parser_settings settings;
+    memset(&settings, 0, sizeof(http_parser_settings));
+    settings.on_url = on_url;
+    settings.on_header_value = on_header_value;
+    settings.on_header_field = on_header_field;
 
 
-	http_parser_settings settings;
-	memset(&settings, 0, sizeof(http_parser_settings));
-	settings.on_url = on_url;
+    while (1) {
+        if (listen(socket, 10) < 0) {
+            perror("server: listen");
+            exit(EXIT_FAILURE);
+        }
 
-	while (1) {
-		if (listen(socket, 10) < 0) {
-			perror("server: listen");
-			exit(1);
-		}
-		int new_socket;
+        socklen_t addrlen;
+        const int new_socket = accept(socket, (struct sockaddr *)&address, &addrlen);
 
-    socklen_t addrlen;
-		if ((new_socket = accept(socket, (struct sockaddr *)&address, &addrlen)) < 0) {
-			perror("server: accept");
-			exit(1);
-		}
-		if (new_socket > 0) {
-			printf("The Client is connected...\n");
-		}
-		size_t len = 80 * 1024;
-		char buf[len];
+        if (new_socket <= 0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
 
-		const ssize_t recved = recv(new_socket, buf, len, 0);
+        size_t len = 80 * 1024;
+        char buf[len];
 
-		if (recved < 0) {
-			/* Handle error. */
-		}
-		struct parser_data data;
-		data.url = buffer_new();
+        const ssize_t recved = recv(new_socket, buf, len, 0);
 
-		http_parser *parser = malloc(sizeof(http_parser));
-		http_parser_init(parser, HTTP_REQUEST);
-		parser->data = &data;
+        if (recved < 0) {
+            /* Handle error. */
+        }
+        struct parser_data data;
+        data.url = buffer_new();
 
-		/* Start up / continue the parser. Note we pass recved==0 to
-		   signal that EOF has been received. */
-		/*const size_t nparsed =*/ http_parser_execute(parser, &settings, buf, recved);
+        http_parser *parser = malloc(sizeof(http_parser));
+        http_parser_init(parser, HTTP_REQUEST);
+        parser->data = &data;
 
-    if (parser->http_errno) {
-      perror("http error");
+        /* Start up / continue the parser. Note we pass recved==0 to
+           signal that EOF has been received. */
+        /*const size_t nparsed =*/ http_parser_execute(parser, &settings, buf, recved);
+
+        if (parser->http_errno) {
+            perror("http error");
+        }
+
+        if (parser->upgrade) {
+            /* handle new protocol */
+            //} else if (nparsed != recved) {
+            /* Handle error. Usually just close the connection. */
+        }
+        const char *path = data.url->data;
+        send_file(new_socket, root, path);
+
+        free(parser);
+        buffer_free(data.url);
+        shutdown(new_socket, SHUT_RDWR);
+        close(new_socket);
     }
+    close(socket);
 
-		if (parser->upgrade) {
-			/* handle new protocol */
-		//} else if (nparsed != recved) {
-			/* Handle error. Usually just close the connection. */
-		}
-		const char *path = data.url->data;
-		send_file(new_socket, root, path);
-
-		free(parser);
-		buffer_free(data.url);
-		close(new_socket);
-	}
-	close(socket);
-
-	return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
