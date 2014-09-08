@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <assert.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -13,21 +14,34 @@
 #include "buffer.h"
 #include "http_parser.h"
 
+enum {
+    time_buffer_size = 100
+};
+
 struct parser_data {
     buffer_t* url;
     buffer_t* user_agent;
     int reading_user_agent;
+    char* client_address;
+    struct tm timeinfo;
 };
 
-void parser_data_init(struct parser_data* data) {
+void parser_data_init(struct parser_data* data, const char* client_address) {
     data->url        = buffer_new();
     data->user_agent = buffer_new();
     data->reading_user_agent = 0;
+    data->client_address = strdup(client_address);
+
+    // Log the current time
+    time_t rawtime;
+    time(&rawtime);
+    gmtime_r(&rawtime, &data->timeinfo);
 }
 
 void parser_data_destroy(struct parser_data* data) {
     buffer_free(data->url);
     buffer_free(data->user_agent);
+    free(data->client_address);
 }
 
 static void version(FILE* file) {
@@ -62,21 +76,14 @@ static int on_url(http_parser * parser, const char *at, size_t len) {
     return 0;
 }
 
-static buffer_t* response_headers(int length, int max_age)
+static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
 {
     buffer_t *result = buffer_new();
     buffer_append(result, "HTTP/1.1 200 OK\r\n");
 
-    enum {
-        time_buffer_size = 100
-    };
+    
     char time_buffer[time_buffer_size];
-
-    time_t rawtime;
-    time(&rawtime);
-    struct tm timeinfo;
-    gmtime_r(&rawtime, &timeinfo);
-    const size_t time_size = strftime(time_buffer, time_buffer_size, "%a, %d %h %Y %T %Z", &timeinfo);
+    const size_t time_size = strftime(time_buffer, time_buffer_size, "%a, %d %h %Y %T %Z", timeinfo);
 
     if (time_size == 0) {
         fprintf(stderr, "Error formatting time");
@@ -103,9 +110,8 @@ static buffer_t* response_headers(int length, int max_age)
     return result;
 }
 
-static void send_file(int socket, const char *root, const char *filename, const char* user_agent)
+static void send_file(int socket, const char *root, const char *filename, const char* user_agent, const char* client_address, struct tm *timeinfo)
 {
-    printf("The user agent: %s\n", user_agent);
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
     buffer_append(buffer, filename);
@@ -120,7 +126,7 @@ static void send_file(int socket, const char *root, const char *filename, const 
     int stat_res = fstat(file, &stat);
     assert(stat_res == 0);
     // TODO max age
-    buffer_t * headers = response_headers(stat.st_size, 0);
+    buffer_t * headers = response_headers(stat.st_size, 0, timeinfo);
 
     write(socket, headers->data, buffer_length(headers));
 
@@ -139,13 +145,25 @@ static void send_file(int socket, const char *root, const char *filename, const 
         return;
     }
 
-    // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
+    char time_buffer[time_buffer_size];
+    const size_t time_size = strftime(time_buffer, time_buffer_size, "%FT%T%z", timeinfo);
 
-    printf("<client ip> - - [time] <GET> %s 200\n", filename);
+    if (time_size == 0) {
+        // TODO: long jump instead
+        fprintf(stderr, "Error formatting time");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Log request in Apache "Combined Log Format"
+    // http://httpd.apache.org/docs/1.3/logs.html
+    // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
+    // 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
+
+    printf("%s - - [%s] GET %s 200 \"%s\"\n", client_address, time_buffer, filename, user_agent);
     close(file);
 }
 
-int open_connection(uint16_t port, struct sockaddr_in* address)
+int open_connection(uint16_t port)
 {
     const int create_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (create_socket < 1) {
@@ -153,9 +171,10 @@ int open_connection(uint16_t port, struct sockaddr_in* address)
         exit(EXIT_FAILURE);
     }
 
-    address->sin_family = AF_INET;
-    address->sin_addr.s_addr = INADDR_ANY;
-    address->sin_port = htons(port);
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
 
     const int yes = 1;
     if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
@@ -163,7 +182,7 @@ int open_connection(uint16_t port, struct sockaddr_in* address)
         exit(EXIT_FAILURE);
     }
 
-    const int bound = bind(create_socket, (struct sockaddr *)address, sizeof(*address));
+    const int bound = bind(create_socket, (struct sockaddr *)&address, sizeof(address));
 
     if (bound != 0) {
         fprintf(stderr, "Failed to bind to port %d", port);
@@ -185,9 +204,9 @@ int main(int argc, char **argv)
     printf("Garçon! Serving content from %s on port %d\n", root, port);
     version(stdout);
     
-    struct sockaddr_in address;
     
-    const int socket = open_connection(port, &address);
+    
+    const int socket = open_connection(port);
 
     http_parser_settings settings;
     memset(&settings, 0, sizeof(http_parser_settings));
@@ -201,6 +220,7 @@ int main(int argc, char **argv)
             exit(EXIT_FAILURE);
         }
 
+        struct sockaddr_in address;
         socklen_t addrlen;
         const int new_socket = accept(socket, (struct sockaddr *)&address, &addrlen);
 
@@ -218,7 +238,7 @@ int main(int argc, char **argv)
             /* Handle error. */
         }
         struct parser_data data;
-        parser_data_init(&data);
+        parser_data_init(&data, inet_ntoa(address.sin_addr));
 
         http_parser *parser = malloc(sizeof(http_parser));
         http_parser_init(parser, HTTP_REQUEST);
@@ -237,8 +257,10 @@ int main(int argc, char **argv)
             //} else if (nparsed != recved) {
             /* Handle error. Usually just close the connection. */
         }
+
+        // TODO: assert method is GET
         const char *path = data.url->data;
-        send_file(new_socket, root, path, data.user_agent->data);
+        send_file(new_socket, root, path, data.user_agent->data, data.client_address, &data.timeinfo);
 
         parser_data_destroy(&data);
         free(parser);
