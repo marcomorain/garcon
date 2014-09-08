@@ -28,24 +28,21 @@ static buffer_t *
  response_headers(int length, int max_age)
 {
 	buffer_t *result = buffer_new();
-	buffer_append(result, "HTTP/1.1 200 OK");
+	buffer_append(result, "HTTP/1.1 200 OK\n");
 
-//<Date: Sun, 07 Sep 2014 14: 51:17 GMT
-// <Last - Modified: Sun, 07 Sep 2014 01: 37:26 GMT
-	    // return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
+  // <Date: Sun, 07 Sep 2014 14: 51:17 GMT
+  // <Last - Modified: Sun, 07 Sep 2014 01: 37:26 GMT
+	// return (strftime(tmbuf, len, "%a, %d %h %Y %T %Z", &tm));
 
-//<Content - Type:image / gif
-	    max_age = 31536000;
-	buffer_appendf(result, "cache-control: public, max-age=%d", max_age);
+  // <Content - Type:image / gif
+	max_age = 31536000;
+	buffer_appendf(result, "cache-control: public, max-age=%d\n", max_age);
 
-//Content - Length:459211
-	    buffer_appendf(result, "Content-Length: %d", length);
-
-
-
-	buffer_append(result, "Access-Control-Allow-Methods: GET");
-	buffer_append(result, "Access-Control-Allow-Origin: *");
-	buffer_append(result, "Server: Garcon 1.0");
+  // Content - Length:459211
+	buffer_appendf(result, "Content-Length: %d\n", length);
+	buffer_append(result, "Access-Control-Allow-Methods: GET\n");
+	buffer_append(result, "Access-Control-Allow-Origin: *\n");
+	buffer_append(result, "Server: Garcon 1.0\n");
 
 	return result;
 }
@@ -66,8 +63,8 @@ static void send_file(int socket, const char *root, const char *filename)
 	struct stat stat;
 	int stat_res = fstat(file, &stat);
 	assert(stat_res == 0);
-	//TODO max age
-	    buffer_t * headers = response_headers(stat.st_size, 0);
+	// TODO max age
+	buffer_t * headers = response_headers(stat.st_size, 0);
 
 	puts("headers:");
 	puts(headers->data);
@@ -80,58 +77,70 @@ static void send_file(int socket, const char *root, const char *filename)
 	if (result == -1) {
 		return;
 	}
-	//READ FILE
-	    close(file);
+	close(file);
+}
+
+int open_connection(uint16_t port, struct sockaddr_in* address)
+{
+  printf("Listening on %d\n", port);
+
+  const int create_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (create_socket < 1) {
+    perror("opening socket\n");
+    exit(EXIT_FAILURE);
+  }
+
+  address->sin_family = AF_INET;
+  address->sin_addr.s_addr = INADDR_ANY;
+  address->sin_port = htons(port);
+
+  const int yes = 1;
+  if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+    perror("setsockopt");
+    exit(EXIT_FAILURE);
+  }
+
+  const int bound = bind(create_socket, (struct sockaddr *)address, sizeof(*address));
+
+  if (bound != 0) {
+    perror("bind failed");
+    exit(EXIT_FAILURE);
+  }
+
+  return create_socket;
 }
 
 int main(int argc, char **argv)
 {
 
-
 	(void)argc;
 	(void)argv;
 	puts("Garçon!");
 
+  struct sockaddr_in address;
+
 	const uint16_t port = 8888;
 
+  const int socket = open_connection(port, &address);
 
 	const char *root = getcwd(0, 0);
 	printf("Serving content from %s\n", root);
 
 
-	socklen_t addrlen;
-	struct sockaddr_in address;
-
-	int create_socket;
-	if ((create_socket = socket(AF_INET, SOCK_STREAM, 0)) > 0) {
-		printf("The socket was created\n");
-	}
-	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(port);
-
-	int yes = 1;
-	if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-		perror("setsockopt");
-	}
-	if (bind(create_socket, (struct sockaddr *)&address, sizeof(address)) == 0) {
-		printf("Binding socket on port %d\n", port);
-	} else {
-		perror("bind failed");
-	}
 
 	http_parser_settings settings;
 	memset(&settings, 0, sizeof(http_parser_settings));
 	settings.on_url = on_url;
 
 	while (1) {
-		if (listen(create_socket, 10) < 0) {
+		if (listen(socket, 10) < 0) {
 			perror("server: listen");
 			exit(1);
 		}
 		int new_socket;
 
-		if ((new_socket = accept(create_socket, (struct sockaddr *)&address, &addrlen)) < 0) {
+    socklen_t addrlen;
+		if ((new_socket = accept(socket, (struct sockaddr *)&address, &addrlen)) < 0) {
 			perror("server: accept");
 			exit(1);
 		}
@@ -141,7 +150,7 @@ int main(int argc, char **argv)
 		size_t len = 80 * 1024;
 		char buf[len];
 
-		ssize_t recved = recv(new_socket, buf, len, 0);
+		const ssize_t recved = recv(new_socket, buf, len, 0);
 
 		if (recved < 0) {
 			/* Handle error. */
@@ -155,11 +164,15 @@ int main(int argc, char **argv)
 
 		/* Start up / continue the parser. Note we pass recved==0 to
 		   signal that EOF has been received. */
-		size_t nparsed = http_parser_execute(parser, &settings, buf, recved);
+		/*const size_t nparsed =*/ http_parser_execute(parser, &settings, buf, recved);
+
+    if (parser->http_errno) {
+      perror("http error");
+    }
 
 		if (parser->upgrade) {
 			/* handle new protocol */
-		} else if (nparsed != recved) {
+		//} else if (nparsed != recved) {
 			/* Handle error. Usually just close the connection. */
 		}
 		const char *path = data.url->data;
@@ -169,7 +182,7 @@ int main(int argc, char **argv)
 		buffer_free(data.url);
 		close(new_socket);
 	}
-	close(create_socket);
+	close(socket);
 
 	return EXIT_SUCCESS;
 }

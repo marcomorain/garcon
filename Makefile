@@ -2,7 +2,8 @@
 PREFIX ?= /usr/local
 TARGET = garcon
 LIBS = -lm
-CFLAGS = -D_POSIX_C_SOURCE=200112L -std=c99 -Wall -Wextra # -Werror -Os
+CFLAGS = -std=c99 -Wall -Wextra # -Werror -Os
+# CFLAGS = -D_POSIX_C_SOURCE=200112L -std=c99 -Wall -Wextra # -Werror -Os
 
 .PHONY: default all clean install uninstall
 
