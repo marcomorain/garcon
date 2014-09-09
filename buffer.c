@@ -321,7 +321,7 @@ buffer_print(buffer_t *self) {
   printf("\n ");
 
   // hex
-  for (int i = 0; i < len; ++i) {
+  for (size_t i = 0; i < len; ++i) {
     printf(" %02x", self->alloc[i]);
     if ((i + 1) % 8 == 0) printf("\n ");
   }

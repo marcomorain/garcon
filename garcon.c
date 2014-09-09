@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "buffer.h"
+#include "map.h"
 #include "http_parser.h"
 
 enum {
@@ -19,18 +20,23 @@ enum {
 };
 
 struct parser_data {
-    buffer_t* url;
-    buffer_t* user_agent;
-    int reading_user_agent;
-    char* client_address;
+    buffer_t *url;
+    char *client_address;
     struct tm timeinfo;
+    struct map_t* headers;
+    struct {
+        buffer_t* key;
+        buffer_t* val;
+    } header;
 };
 
 void parser_data_init(struct parser_data* data, const char* client_address) {
     data->url        = buffer_new();
-    data->user_agent = buffer_new();
-    data->reading_user_agent = 0;
     data->client_address = strdup(client_address);
+    data->headers    = new_map();
+    map_set_free_func(data->headers, free);
+    data->header.key = buffer_new();
+    data->header.val = buffer_new();
 
     // Log the current time
     time_t rawtime;
@@ -40,8 +46,11 @@ void parser_data_init(struct parser_data* data, const char* client_address) {
 
 void parser_data_destroy(struct parser_data* data) {
     buffer_free(data->url);
-    buffer_free(data->user_agent);
     free(data->client_address);
+    destroy_map(&data->headers);
+    buffer_free(data->header.key);
+    buffer_free(data->header.val);
+    memset(&data, 0, sizeof(data));
 }
 
 static void version(FILE* file) {
@@ -52,21 +61,22 @@ static void version(FILE* file) {
     fprintf(file, "http_parser v%u.%u.%u\n", major, minor, patch);
 }
 
-static int on_header_value(http_parser * parser, const char *at, size_t len) {
+static int on_header_field(http_parser * parser, const char *at, size_t len) {
     struct parser_data *data = parser->data;
-    if (data->reading_user_agent) {
-        buffer_append_n(data->user_agent, at, len);
+
+    if (buffer_length(data->header.val) > 0) {
+        map_set(data->headers,  strdup(data->header.key->data),
+                strdup(data->header.val->data));
+        buffer_clear(data->header.key);
+        buffer_clear(data->header.val);
     }
+    buffer_append_n(data->header.key, at, len);
     return 0;
 }
 
-static int on_header_field(http_parser * parser, const char *at, size_t len) {
+static int on_header_value(http_parser * parser, const char *at, size_t len) {
     struct parser_data *data = parser->data;
-    if (strncmp(at, "User-Agent", len) == 0) {
-        data->reading_user_agent = 1;
-    } else {
-        data->reading_user_agent = 0;
-    }
+    buffer_append_n(data->header.val, at, len);
     return 0;
 }
 
@@ -81,7 +91,7 @@ static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
     buffer_t *result = buffer_new();
     buffer_append(result, "HTTP/1.1 200 OK\r\n");
 
-    
+
     char time_buffer[time_buffer_size];
     const size_t time_size = strftime(time_buffer, time_buffer_size, "%a, %d %h %Y %T %Z", timeinfo);
 
@@ -92,7 +102,7 @@ static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
 
     // Date: Sun, 07 Sep 2014 14: 51:17 GMT
     buffer_appendf(result, "Date: %s\r\n", time_buffer);
-    
+
     // TODO:
     // Last-Modified: Sun, 07 Sep 2014 01: 37:26 GMT
     // Content-Type:image / gif
@@ -109,6 +119,7 @@ static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
 
     return result;
 }
+
 
 static void send_file(int socket, const char *root, const char *filename, const char* user_agent, const char* client_address, struct tm *timeinfo)
 {
@@ -156,8 +167,10 @@ static void send_file(int socket, const char *root, const char *filename, const 
 
     // Log request in Apache "Combined Log Format"
     // http://httpd.apache.org/docs/1.3/logs.html
+    // <ip-address> <identd> <user> [<time>] "<request>" <status> <bytes> "<Referer>" "<User-agent>"
     // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
     // 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
+    //
 
     printf("%s - - [%s] GET %s 200 \"%s\"\n", client_address, time_buffer, filename, user_agent);
     close(file);
@@ -203,9 +216,7 @@ int main(int argc, char **argv)
     const char *root = getcwd(0, 0);
     printf("Garçon! Serving content from %s on port %d\n", root, port);
     version(stdout);
-    
-    
-    
+
     const int socket = open_connection(port);
 
     http_parser_settings settings;
@@ -214,7 +225,8 @@ int main(int argc, char **argv)
     settings.on_header_value = on_header_value;
     settings.on_header_field = on_header_field;
 
-    while (1) {
+    for(;;)
+    {
         if (listen(socket, 10) < 0) {
             perror("server: listen");
             exit(EXIT_FAILURE);
@@ -248,8 +260,20 @@ int main(int argc, char **argv)
            signal that EOF has been received. */
         /*const size_t nparsed =*/ http_parser_execute(parser, &settings, buf, recved);
 
+        // printf("Headers\n");
+        // for (struct map_node_t* node = data.headers->head; node; node = node->next) {
+        //     if (node->value) {
+        //         printf("%s: %s\n", node->key, node->value);
+        //     }
+        // }
+
         if (parser->http_errno) {
             perror("http error");
+        }
+
+        if (parser->method != HTTP_GET) {
+            // TODO: method not supported
+            fprintf(stderr, "%s method is not supported\n", http_method_str(parser->method));
         }
 
         if (parser->upgrade) {
@@ -260,7 +284,8 @@ int main(int argc, char **argv)
 
         // TODO: assert method is GET
         const char *path = data.url->data;
-        send_file(new_socket, root, path, data.user_agent->data, data.client_address, &data.timeinfo);
+
+        send_file(new_socket, root, path, map_get(data.headers, "User-Agent"), data.client_address, &data.timeinfo);
 
         parser_data_destroy(&data);
         free(parser);

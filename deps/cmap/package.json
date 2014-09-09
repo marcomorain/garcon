@@ -1,0 +1,9 @@
+{
+  "name": "cmap",
+  "version": "0.0.1",
+  "repo": "jlcordeiro/cmap",
+  "description": "Basic implementation of a map container in C.",
+  "keywords": ["map", "container"],
+  "license": "MIT",
+  "src": ["map.c", "map.h"]
+}
