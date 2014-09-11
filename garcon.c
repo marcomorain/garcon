@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "buffer.h"
 #include "map.h"
+#include "commander.h"
 #include "http_parser.h"
 
 enum {
@@ -176,7 +177,7 @@ static void send_file(int socket, const char *root, const char *filename, const 
     close(file);
 }
 
-int open_connection(uint16_t port)
+int open_connection(int port)
 {
     const int create_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (create_socket < 1) {
@@ -206,18 +207,51 @@ int open_connection(uint16_t port)
     return create_socket;
 }
 
+
+struct options {
+    char* root;
+    int port;
+};
+
+static void init_options(struct options* options) {
+    options->port = 8888;
+    options->root = getcwd(0, 0);
+}
+
+static void set_root(command_t *self) {
+    struct options* options = self->data;
+    // TODO Error checking of folder (stat)
+    options->root = realpath(self->arg, NULL);
+    if (!options->root) {
+        fprintf(stderr, "Cannot find directory %s", self->arg);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void set_port(command_t *self) {
+    struct options* options = self->data;
+    // TODO Error checking of port
+    options->port = atoi(self->arg);
+    
+}
+
 int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    struct options options;
+    init_options(&options);
 
-    const uint16_t port = 8888;
+    command_t cmd;
+    cmd.data = &options;
+    command_init(&cmd, argv[0], "0.0.1");
+    command_option(&cmd, "-d", "--directory [arg]", "The root directory to serve files from (default to the current working directory)", set_root);
+    command_option(&cmd, "-p", "--port [arg]", "Which port to listen on (default 8888)", set_port);
+    command_parse(&cmd, argc, argv);
 
-    const char *root = getcwd(0, 0);
-    printf("Garçon! Serving content from %s on port %d\n", root, port);
+    
+    printf("Garçon! Serving content from %s on port %d\n", options.root, options.port);
     version(stdout);
 
-    const int socket = open_connection(port);
+    const int socket = open_connection(options.port);
 
     http_parser_settings settings;
     memset(&settings, 0, sizeof(http_parser_settings));
@@ -285,7 +319,7 @@ int main(int argc, char **argv)
         // TODO: assert method is GET
         const char *path = data.url->data;
 
-        send_file(new_socket, root, path, map_get(data.headers, "User-Agent"), data.client_address, &data.timeinfo);
+        send_file(new_socket, options.root, path, map_get(data.headers, "User-Agent"), data.client_address, &data.timeinfo);
 
         parser_data_destroy(&data);
         free(parser);
