@@ -11,6 +11,8 @@
 #include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
+#include <dirent.h>
 #include "buffer.h"
 #include "map.h"
 #include "commander.h"
@@ -122,7 +124,31 @@ static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
 }
 
 
-static void send_file(int socket, const char *root, const char *filename, const char* user_agent, const char* client_address, struct tm *timeinfo)
+static void send_error(int socket, int code, struct tm *time) {
+	buffer_t* buffer = buffer_new();
+	buffer_appendf(buffer, "http error %d cannot foo bar", code);
+
+	int age = 0;
+
+	buffer_t* headers = response_headers(buffer_length(buffer), age, time);
+  write(socket, headers->data, buffer_length(headers));
+	buffer_free(headers);
+
+	int written = write(socket, buffer->data, buffer_length(buffer));
+	if (written == -1){
+		fprintf(stderr, "Error writing");
+		exit(-1);
+	}
+	buffer_free(buffer);
+}
+
+static void send_file(
+		int socket,
+		const char *root,
+		const char *filename,
+		const char* user_agent,
+		const char* client_address,
+		struct tm *timeinfo)
 {
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
@@ -131,12 +157,19 @@ static void send_file(int socket, const char *root, const char *filename, const 
     buffer_free(buffer);
     if (file <= 0) {
         fprintf(stderr, "Cannot open %s\n", filename);
-        // TODO: 404
+				send_error(socket, 404, timeinfo);
         return;
     }
     struct stat stat;
     int stat_res = fstat(file, &stat);
     assert(stat_res == 0);
+
+		if (!S_ISREG(stat.st_mode)) {
+			printf("%s is not a regular file\n", filename);
+			send_error(socket, 403, timeinfo);
+			return;
+		}
+
     // TODO max age
     buffer_t * headers = response_headers(stat.st_size, 0, timeinfo);
 
@@ -185,16 +218,16 @@ int open_connection(int port)
         exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
-
     const int yes = 1;
     if (setsockopt(create_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
+
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
 
     const int bound = bind(create_socket, (struct sockaddr *)&address, sizeof(address));
 
@@ -210,7 +243,7 @@ int open_connection(int port)
 
 struct options {
     char* root;
-    int port;
+    long int port;
 };
 
 static void init_options(struct options* options) {
@@ -220,7 +253,6 @@ static void init_options(struct options* options) {
 
 static void set_root(command_t *self) {
     struct options* options = self->data;
-    // TODO Error checking of folder (stat)
     options->root = realpath(self->arg, NULL);
     if (!options->root) {
         fprintf(stderr, "Cannot find directory %s", self->arg);
@@ -230,9 +262,19 @@ static void set_root(command_t *self) {
 
 static void set_port(command_t *self) {
     struct options* options = self->data;
-    // TODO Error checking of port
-    options->port = atoi(self->arg);
-    
+		char* endptr = 0;
+		options->port = strtol(self->arg, &endptr, 10);
+		if (*endptr) {
+			fprintf(stderr, "Error: invalid port number: %s\n", self->arg);
+			exit(EXIT_FAILURE);
+		}
+
+		if (options->port > USHRT_MAX) {
+			fprintf(stderr, "Error: port number %ld is larger than the max %d\n",
+					options->port,
+					USHRT_MAX);
+			exit(EXIT_FAILURE);
+		}
 }
 
 int main(int argc, char **argv)
@@ -247,8 +289,7 @@ int main(int argc, char **argv)
     command_option(&cmd, "-p", "--port [arg]", "Which port to listen on (default 8888)", set_port);
     command_parse(&cmd, argc, argv);
 
-    
-    printf("Garçon! Serving content from %s on port %d\n", options.root, options.port);
+    printf("Garçon! Serving content from %s on port %ld\n", options.root, options.port);
     version(stdout);
 
     const int socket = open_connection(options.port);
@@ -316,7 +357,6 @@ int main(int argc, char **argv)
             /* Handle error. Usually just close the connection. */
         }
 
-        // TODO: assert method is GET
         const char *path = data.url->data;
 
         send_file(new_socket, options.root, path, map_get(data.headers, "User-Agent"), data.client_address, &data.timeinfo);
