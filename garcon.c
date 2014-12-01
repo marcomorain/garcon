@@ -89,11 +89,10 @@ static int on_url(http_parser * parser, const char *at, size_t len) {
     return 0;
 }
 
-static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
+static buffer_t* response_headers(int length, int max_age, const struct tm *timeinfo)
 {
     buffer_t *result = buffer_new();
     buffer_append(result, "HTTP/1.1 200 OK\r\n");
-
 
     char time_buffer[time_buffer_size];
     const size_t time_size = strftime(time_buffer, time_buffer_size, "%a, %d %h %Y %T %Z", timeinfo);
@@ -123,55 +122,90 @@ static buffer_t* response_headers(int length, int max_age, struct tm *timeinfo)
     return result;
 }
 
+struct request {
+  const char* uri;
+  const char* user_agent;
+  const char* method;
+  const char* client_address;
+  const struct tm* time;
+};
 
-static void send_error(int socket, int code, struct tm *time) {
+static void log(int status, const struct request* request) {
+
+    char time_buffer[time_buffer_size];
+    const size_t time_size = strftime(time_buffer,
+        time_buffer_size, "%FT%T%z", request->time);
+
+    if (time_size == 0) {
+        // TODO: long jump instead
+        fprintf(stderr, "Error formatting time");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Log request in Apache "Combined Log Format"
+    // http://httpd.apache.org/docs/1.3/logs.html
+    // <ip-address> <identd> <user> [<time>] "<request>" <status> <bytes> "<Referer>" "<User-agent>"
+    // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
+    // 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
+    printf("%s - - [%s] %s %s %d \"%s\"\n",
+        request->client_address,
+        time_buffer,
+        request->method,
+        request->uri,
+        status,
+        request->user_agent);
+}
+
+static void send_error(int socket, int status, const struct request* request) {
 	buffer_t* buffer = buffer_new();
-	buffer_appendf(buffer, "http error %d cannot foo bar", code);
+	buffer_appendf(buffer, "http error %d", status);
 
 	int age = 0;
 
-	buffer_t* headers = response_headers(buffer_length(buffer), age, time);
-  write(socket, headers->data, buffer_length(headers));
+	buffer_t* headers = response_headers(buffer_length(buffer), age, request->time);
+  int header_bytes_written = write(socket, headers->data, buffer_length(headers));
 	buffer_free(headers);
+
+  if (header_bytes_written == -1) {
+    fputs("Error -1 writting error headers to socket\n", stderr);
+  }
 
 	int written = write(socket, buffer->data, buffer_length(buffer));
 	if (written == -1){
-		fprintf(stderr, "Error writing");
-		exit(-1);
+		fprintf(stderr, "Error -1 writing error message to socket");
 	}
 	buffer_free(buffer);
+  log(status, request);
 }
+
 
 static void send_file(
 		int socket,
 		const char *root,
-		const char *filename,
-		const char* user_agent,
-		const char* client_address,
-		struct tm *timeinfo)
+    const struct request *request)
 {
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
-    buffer_append(buffer, filename);
+    buffer_append(buffer, request->uri);
     int file = open(buffer->data, O_RDONLY);
-    buffer_free(buffer);
     if (file <= 0) {
-        fprintf(stderr, "Cannot open %s\n", filename);
-				send_error(socket, 404, timeinfo);
+        fprintf(stderr, "Cannot open %s\n", request->uri);
+				send_error(socket, 404, request);
         return;
     }
+    buffer_free(buffer);
     struct stat stat;
     int stat_res = fstat(file, &stat);
     assert(stat_res == 0);
 
 		if (!S_ISREG(stat.st_mode)) {
-			printf("%s is not a regular file\n", filename);
-			send_error(socket, 403, timeinfo);
+			printf("%s is not a regular file\n", request->uri);
+			send_error(socket, 403, request);
 			return;
 		}
 
     // TODO max age
-    buffer_t * headers = response_headers(stat.st_size, 0, timeinfo);
+    buffer_t * headers = response_headers(stat.st_size, 0, request->time);
 
     write(socket, headers->data, buffer_length(headers));
 
@@ -189,25 +223,8 @@ static void send_file(
         perror("sendfile");
         return;
     }
-
-    char time_buffer[time_buffer_size];
-    const size_t time_size = strftime(time_buffer, time_buffer_size, "%FT%T%z", timeinfo);
-
-    if (time_size == 0) {
-        // TODO: long jump instead
-        fprintf(stderr, "Error formatting time");
-        exit(EXIT_SUCCESS);
-    }
-
-    // Log request in Apache "Combined Log Format"
-    // http://httpd.apache.org/docs/1.3/logs.html
-    // <ip-address> <identd> <user> [<time>] "<request>" <status> <bytes> "<Referer>" "<User-agent>"
-    // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
-    // 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
-    //
-
-    printf("%s - - [%s] GET %s 200 \"%s\"\n", client_address, time_buffer, filename, user_agent);
-    close(file);
+    log(200, request);
+   close(file);
 }
 
 int open_connection(int port)
@@ -322,7 +339,9 @@ int main(int argc, char **argv)
         const ssize_t recved = recv(new_socket, buf, len, 0);
 
         if (recved < 0) {
+          fprintf(stderr, "Error recved = %zd\n", recved);
             /* Handle error. */
+          continue;
         }
         struct parser_data data;
         parser_data_init(&data, inet_ntoa(address.sin_addr));
@@ -333,34 +352,40 @@ int main(int argc, char **argv)
 
         /* Start up / continue the parser. Note we pass recved==0 to
            signal that EOF has been received. */
-        /*const size_t nparsed =*/ http_parser_execute(parser, &settings, buf, recved);
+        const size_t nparsed = http_parser_execute(parser, &settings, buf, recved);
 
-        // printf("Headers\n");
-        // for (struct map_node_t* node = data.headers->head; node; node = node->next) {
-        //     if (node->value) {
-        //         printf("%s: %s\n", node->key, node->value);
-        //     }
-        // }
+        const int headers = 0;
 
-        if (parser->http_errno) {
-            perror("http error");
+        if (headers) {
+          puts("Headers");
+          for (struct map_node_t* node = data.headers->head; node; node = node->next) {
+            if (node->value) {
+                printf("%s: %s\n", node->key, node->value);
+            }
+          }
         }
 
-        if (parser->method != HTTP_GET) {
-            // TODO: method not supported
-            fprintf(stderr, "%s method is not supported\n", http_method_str(parser->method));
-        }
+        struct request request;
+        request.user_agent = map_get(data.headers, "User-Agent");
+        request.client_address = data.client_address;
+        request.time = &data.timeinfo;
+        request.uri = data.url->data;
+        request.method = http_method_str(parser->method);
 
-        if (parser->upgrade) {
+        if (recved == 0) {
+          fputs("recv returned 0 (bug?)\n", stderr);
+        } else if ((nparsed != recved) || parser->http_errno) {
+          request.user_agent = "";
+          request.method = "";
+          request.uri = "BAD REQUEST";
+          send_error(new_socket, 400, &request);
+        } else if (parser->method != HTTP_GET) {
+            send_error(new_socket, 405, &request);
+        } else if (parser->upgrade) {
             /* handle new protocol */
-            //} else if (nparsed != recved) {
-            /* Handle error. Usually just close the connection. */
+        } else {
+          send_file(new_socket, options.root, &request);
         }
-
-        const char *path = data.url->data;
-
-        send_file(new_socket, options.root, path, map_get(data.headers, "User-Agent"), data.client_address, &data.timeinfo);
-
         parser_data_destroy(&data);
         free(parser);
         shutdown(new_socket, SHUT_RDWR);
