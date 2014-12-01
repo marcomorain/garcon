@@ -56,14 +56,6 @@ void parser_data_destroy(struct parser_data* data) {
     memset(&data, 0, sizeof(data));
 }
 
-static void version(FILE* file) {
-    const unsigned long version = http_parser_version();
-    const unsigned major = (version >> 16) & 255;
-    const unsigned minor = (version >> 8) & 255;
-    const unsigned patch = version & 255;
-    fprintf(file, "http_parser v%u.%u.%u\n", major, minor, patch);
-}
-
 static int on_header_field(http_parser * parser, const char *at, size_t len) {
     struct parser_data *data = parser->data;
 
@@ -189,7 +181,7 @@ static void send_file(
     buffer_append(buffer, request->uri);
     int file = open(buffer->data, O_RDONLY);
     if (file <= 0) {
-        fprintf(stderr, "Cannot open %s\n", request->uri);
+        //fprintf(stderr, "Cannot open %s\n", request->uri);
 				send_error(socket, 404, request);
         return;
     }
@@ -199,7 +191,6 @@ static void send_file(
     assert(stat_res == 0);
 
 		if (!S_ISREG(stat.st_mode)) {
-			printf("%s is not a regular file\n", request->uri);
 			send_error(socket, 403, request);
 			return;
 		}
@@ -307,7 +298,6 @@ int main(int argc, char **argv)
     command_parse(&cmd, argc, argv);
 
     printf("Garçon! Serving content from %s on port %ld\n", options.root, options.port);
-    version(stdout);
 
     const int socket = open_connection(options.port);
 
