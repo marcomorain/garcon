@@ -6,8 +6,8 @@
 
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include "buffer.h"
@@ -141,6 +141,50 @@ buffer_resize(buffer_t *self, size_t n) {
 }
 
 /*
+ * Append or prepend a formatted string to the buffer.
+ */
+static int buffer_format_helper(buffer_t *self, const char* format, va_list ap,
+    int front) {
+  char *formatted;
+  int result, bytes_formatted;
+  bytes_formatted = vasprintf(&formatted, format, ap);
+  if (bytes_formatted < 0) {
+    return -1;
+  }
+
+  if (front) {
+    result = buffer_prepend(self, formatted);
+  } else {
+    result = buffer_append(self, formatted);
+  }
+  free(formatted);
+  return result;
+}
+
+/*
+ * Append a printf-style formatted string to the buffer.
+ */
+int buffer_appendf(buffer_t *self, const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  const int ret = buffer_format_helper(self, format, ap, 0);
+  va_end(ap);
+  return ret;
+}
+
+/*
+ * Prepend a printf-style formatted string to the buffer.
+ */
+int buffer_prependf(buffer_t *self, const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  const int ret = buffer_format_helper(self, format, ap, 1);
+  va_end(ap);
+  return ret;
+}
+
+
+/*
  * Append `str` to `self` and return 0 on success, -1 on failure.
  */
 
@@ -170,22 +214,6 @@ buffer_append_n(buffer_t *self, const char *str, size_t len) {
   strncat(self->data, str, len);
 
   return 0;
-}
-
-int buffer_appendf(buffer_t* self, const char * restrict format, ...) {
-  char* string = 0;
-  va_list list;
-  va_start(list, format);
-  int count = vasprintf(&string, format, list);
-  va_end(list);
-
-  if (count < 0) {
-    return -1;
-  }
-
-  const int result = buffer_append_n(self, string, count);
-  free(string);
-  return result;
 }
 
 /*
@@ -321,7 +349,7 @@ buffer_print(buffer_t *self) {
   printf("\n ");
 
   // hex
-  for (size_t i = 0; i < len; ++i) {
+  for (int i = 0; i < len; ++i) {
     printf(" %02x", self->alloc[i]);
     if ((i + 1) % 8 == 0) printf("\n ");
   }

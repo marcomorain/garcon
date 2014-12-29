@@ -13,9 +13,9 @@
 #include <unistd.h>
 #include <limits.h>
 #include <dirent.h>
-#include "buffer.h"
-#include "map.h"
-#include "commander.h"
+#include "buffer/buffer.h"
+#include "cmap/map.h"
+#include "commander/commander.h"
 #include "http_parser.h"
 
 enum {

@@ -5,8 +5,10 @@
 // Copyright (c) 2012 TJ Holowaychuk <tj@vision-media.ca>
 //
 
-#ifndef BUFFER
-#define BUFFER
+#ifndef BUFFER_H
+#define BUFFER_H 1
+
+#include <sys/types.h>
 
 /*
  * Default buffer size.
@@ -56,13 +58,16 @@ int
 buffer_prepend(buffer_t *self, char *str);
 
 int
+buffer_prependf(buffer_t *self, const char *format, ...);
+
+int
 buffer_append(buffer_t *self, const char *str);
 
 int
-buffer_append_n(buffer_t *self, const char *str, size_t len);
+buffer_appendf(buffer_t *self, const char *format, ...);
 
 int
-buffer_appendf(buffer_t* self, const char * restrict format, ...);
+buffer_append_n(buffer_t *self, const char *str, size_t len);
 
 int
 buffer_equals(buffer_t *self, buffer_t *other);
