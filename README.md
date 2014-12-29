@@ -2,6 +2,8 @@
 
 Garçon is a local HTTP fileserver. It is designed to make it simple to serve the files in a local directory over HTTP. Garçon is intended to be used for local development, and should is not intended to replace the nginx or apache webservers.
 
+I use garcon in place of having to configure `nginx` locally to server a folder when doing web development. Garcon does the same job as running `python -m SimpleHTTPServer 8888`
+
 ## Usage
 
 Using garcon is simple – run `garcon` in a directory to make the contents available over HTTP on `localhost:8888`. You can specify the port and directory using the `--port` and `--directory` command-line arguments.
