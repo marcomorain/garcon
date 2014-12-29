@@ -136,9 +136,10 @@ enum flags
   { F_CHUNKED               = 1 << 0
   , F_CONNECTION_KEEP_ALIVE = 1 << 1
   , F_CONNECTION_CLOSE      = 1 << 2
-  , F_TRAILING              = 1 << 3
-  , F_UPGRADE               = 1 << 4
-  , F_SKIPBODY              = 1 << 5
+  , F_CONNECTION_UPGRADE    = 1 << 3
+  , F_TRAILING              = 1 << 4
+  , F_UPGRADE               = 1 << 5
+  , F_SKIPBODY              = 1 << 6
   };
 
 
@@ -280,7 +281,7 @@ struct http_parser_url {
  *   unsigned major = (version >> 16) & 255;
  *   unsigned minor = (version >> 8) & 255;
  *   unsigned patch = version & 255;
- *   printf("http_parser v%u.%u.%u\n", major, minor, version);
+ *   printf("http_parser v%u.%u.%u\n", major, minor, patch);
  */
 unsigned long http_parser_version(void);
 
