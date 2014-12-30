@@ -118,18 +118,18 @@ static buffer_t* response_headers(int length, int max_age, const struct tm *time
 }
 
 struct request {
-  const char* uri;
-  const char* user_agent;
-  const char* method;
-  const char* client_address;
-  const struct tm* time;
+    const char* uri;
+    const char* user_agent;
+    const char* method;
+    const char* client_address;
+    const struct tm* time;
 };
 
 static void log_request(int status, const struct request* request) {
 
     char time_buffer[time_buffer_size];
     const size_t time_size = strftime(time_buffer,
-        time_buffer_size, "%FT%T%z", request->time);
+            time_buffer_size, "%FT%T%z", request->time);
 
     if (time_size == 0) {
         // TODO: long jump instead
@@ -143,67 +143,67 @@ static void log_request(int status, const struct request* request) {
     // 123.65.150.10 - - [23/Aug/2010:03:50:59 +0000] "POST /wordpress3/wp-admin/admin-ajax.php HTTP/1.1" 200 2 "http://www.example.com/wordpress3/wp-admin/post-new.php" "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_4; en-US) AppleWebKit/534.3 (KHTML, like Gecko) Chrome/6.0.472.25 Safari/534.3"
     // 127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326 "http://www.example.com/start.html" "Mozilla/4.08 [en] (Win98; I ;Nav)"
     printf("%s - - [%s] %s %s %d \"%s\"\n",
-        request->client_address,
-        time_buffer,
-        request->method,
-        request->uri,
-        status,
-        request->user_agent);
+            request->client_address,
+            time_buffer,
+            request->method,
+            request->uri,
+            status,
+            request->user_agent);
 }
 
 static void send_error(int socket, int status, const struct request* request) {
-	buffer_t* buffer = buffer_new();
-	buffer_appendf(buffer, "http error %d", status);
+    buffer_t* buffer = buffer_new();
+    buffer_appendf(buffer, "http error %d", status);
 
-	int age = 0;
+    int age = 0;
 
-	buffer_t* headers = response_headers(buffer_length(buffer), age, request->time);
-  int header_bytes_written = write(socket, headers->data, buffer_length(headers));
-	buffer_free(headers);
+    buffer_t* headers = response_headers(buffer_length(buffer), age, request->time);
+    int header_bytes_written = write(socket, headers->data, buffer_length(headers));
+    buffer_free(headers);
 
-  if (header_bytes_written == -1) {
-    fputs("Error -1 writting error headers to socket\n", stderr);
-  }
+    if (header_bytes_written == -1) {
+        fputs("Error -1 writting error headers to socket\n", stderr);
+    }
 
-	int written = write(socket, buffer->data, buffer_length(buffer));
-	if (written == -1){
-		fprintf(stderr, "Error -1 writing error message to socket");
-	}
-	buffer_free(buffer);
-  log_request(status, request);
+    int written = write(socket, buffer->data, buffer_length(buffer));
+    if (written == -1){
+        fprintf(stderr, "Error -1 writing error message to socket");
+    }
+    buffer_free(buffer);
+    log_request(status, request);
 }
 
 
 static int buffer_endswith_char(buffer_t *self, char ch)
 {
-	size_t len = buffer_length(self);
-	return len > 0 && buffer_string(self)[len-1] == ch;
+    size_t len = buffer_length(self);
+    return len > 0 && buffer_string(self)[len-1] == ch;
 }
 
 
 static void send_file(
-		int socket,
-		const char *root,
-    const struct request *request)
+        int socket,
+        const char *root,
+        const struct request *request)
 {
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
     buffer_append(buffer, request->uri);
     // strip ?... from URI
     if (strrchr(buffer_string(buffer), '?') != NULL) {
-	    buffer_t *old = buffer;
-	    buffer = buffer_slice(old, 0, strrchr(buffer_string(buffer), '?') - buffer_string(buffer));
-	    buffer_free(old);
-	    printf("new buffer content: %s\n", buffer_string(buffer));
+        buffer_t *old = buffer;
+        buffer = buffer_slice(old, 0, strrchr(buffer_string(buffer), '?') - buffer_string(buffer));
+        buffer_free(old);
+        printf("new buffer content: %s\n", buffer_string(buffer));
     }
     if (buffer_endswith_char(buffer, '/')) {
-	    buffer_append(buffer, "index.html");
+        buffer_append(buffer, "index.html");
     }
 
     int file = open(buffer->data, O_RDONLY);
     if (file <= 0) {
         //fprintf(stderr, "Cannot open %s\n", request->uri);
-				send_error(socket, 404, request);
+        send_error(socket, 404, request);
         return;
     }
     buffer_free(buffer);
@@ -211,10 +211,10 @@ static void send_file(
     int stat_res = fstat(file, &stat);
     assert(stat_res == 0);
 
-		if (!S_ISREG(stat.st_mode)) {
-			send_error(socket, 403, request);
-			return;
-		}
+    if (!S_ISREG(stat.st_mode)) {
+        send_error(socket, 403, request);
+        return;
+    }
 
     // TODO max age
     buffer_t * headers = response_headers(stat.st_size, 0, request->time);
@@ -241,7 +241,7 @@ static void send_file(
         return;
     }
     log_request(200, request);
-   close(file);
+    close(file);
 }
 
 int open_connection(int port)
@@ -296,19 +296,19 @@ static void set_root(command_t *self) {
 
 static void set_port(command_t *self) {
     struct options* options = self->data;
-		char* endptr = 0;
-		options->port = strtol(self->arg, &endptr, 10);
-		if (*endptr) {
-			fprintf(stderr, "Error: invalid port number: %s\n", self->arg);
-			exit(EXIT_FAILURE);
-		}
+    char* endptr = 0;
+    options->port = strtol(self->arg, &endptr, 10);
+    if (*endptr) {
+        fprintf(stderr, "Error: invalid port number: %s\n", self->arg);
+        exit(EXIT_FAILURE);
+    }
 
-		if (options->port > USHRT_MAX) {
-			fprintf(stderr, "Error: port number %ld is larger than the max %d\n",
-					options->port,
-					USHRT_MAX);
-			exit(EXIT_FAILURE);
-		}
+    if (options->port > USHRT_MAX) {
+        fprintf(stderr, "Error: port number %ld is larger than the max %d\n",
+                options->port,
+                USHRT_MAX);
+        exit(EXIT_FAILURE);
+    }
 }
 
 int main(int argc, char **argv)
@@ -355,9 +355,9 @@ int main(int argc, char **argv)
         const ssize_t recved = recv(new_socket, buf, len, 0);
 
         if (recved < 0) {
-          fprintf(stderr, "Error recved = %zd\n", recved);
+            fprintf(stderr, "Error recved = %zd\n", recved);
             /* Handle error. */
-          continue;
+            continue;
         }
         struct parser_data data;
         parser_data_init(&data, inet_ntoa(address.sin_addr));
@@ -373,12 +373,12 @@ int main(int argc, char **argv)
         const int headers = 0;
 
         if (headers) {
-          puts("Headers");
-          for (struct map_node_t* node = data.headers->head; node; node = node->next) {
-            if (node->value) {
-                printf("%s: %s\n", node->key, (const char*)node->value);
+            puts("Headers");
+            for (struct map_node_t* node = data.headers->head; node; node = node->next) {
+                if (node->value) {
+                    printf("%s: %s\n", node->key, (const char*)node->value);
+                }
             }
-          }
         }
 
         struct request request;
@@ -389,18 +389,18 @@ int main(int argc, char **argv)
         request.method = http_method_str(parser->method);
 
         if (recved == 0) {
-          fputs("recv returned 0 (bug?)\n", stderr);
+            fputs("recv returned 0 (bug?)\n", stderr);
         } else if ((nparsed != recved) || parser->http_errno) {
-          request.user_agent = "";
-          request.method = "";
-          request.uri = "BAD REQUEST";
-          send_error(new_socket, 400, &request);
+            request.user_agent = "";
+            request.method = "";
+            request.uri = "BAD REQUEST";
+            send_error(new_socket, 400, &request);
         } else if (parser->method != HTTP_GET) {
             send_error(new_socket, 405, &request);
         } else if (parser->upgrade) {
             /* handle new protocol */
         } else {
-          send_file(new_socket, options.root, &request);
+            send_file(new_socket, options.root, &request);
         }
         parser_data_destroy(&data);
         free(parser);
