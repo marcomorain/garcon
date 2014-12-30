@@ -174,6 +174,13 @@ static void send_error(int socket, int status, const struct request* request) {
 }
 
 
+static int buffer_endswith_char(buffer_t *self, char ch)
+{
+	size_t len = buffer_length(self);
+	return len > 0 && buffer_string(self)[len-1] == ch;
+}
+
+
 static void send_file(
 		int socket,
 		const char *root,
@@ -182,6 +189,17 @@ static void send_file(
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
     buffer_append(buffer, request->uri);
+    // strip ?... from URI
+    if (strrchr(buffer_string(buffer), '?') != NULL) {
+	    buffer_t *old = buffer;
+	    buffer = buffer_slice(old, 0, strrchr(buffer_string(buffer), '?') - buffer_string(buffer));
+	    buffer_free(old);
+	    printf("new buffer content: %s\n", buffer_string(buffer));
+    }
+    if (buffer_endswith_char(buffer, '/')) {
+	    buffer_append(buffer, "index.html");
+    }
+
     int file = open(buffer->data, O_RDONLY);
     if (file <= 0) {
         //fprintf(stderr, "Cannot open %s\n", request->uri);
