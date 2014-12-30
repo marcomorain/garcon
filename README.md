@@ -19,6 +19,24 @@ Using garcon is simple – run `garcon` in a directory to make the contents avai
     -p, --port [arg]              Which port to listen on (default 8888)
 ```
 
+## Logging
+Requests are logged to `stdout` in Apache Combined Log Format, which looks like this:
+
+```
+Garçon! Serving content from /Users/marc/dev/garcon on port 8888
+127.0.0.1 - - [2014-12-30T00:02:51+0000] GET /index.html 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36"
+127.0.0.1 - - [2014-12-30T00:03:06+0000] GET /garcon.h 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36"
+127.0.0.1 - - [2014-12-30T00:03:07+0000] GET /garcon.c 200 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36"
+127.0.0.1 - - [2014-12-30T00:03:14+0000] GET /garcon.c 200 "(null)"
+127.0.0.1 - - [2014-12-30T00:03:14+0000] GET /favicon.ico 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/600.2.5 (KHTML, like Gecko) Version/8.0.2 Safari/600.2.5"
+127.0.0.1 - - [2014-12-30T00:03:14+0000] GET /apple-touch-icon-precomposed.png 404 "(null)"
+127.0.0.1 - - [2014-12-30T00:03:14+0000] GET /apple-touch-icon.png 404 "(null)"
+127.0.0.1 - - [2014-12-30T00:03:19+0000] GET /garcon.h 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:34.0) Gecko/20100101 Firefox/34.0"
+127.0.0.1 - - [2014-12-30T00:03:20+0000] GET /favicon.ico 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:34.0) Gecko/20100101 Firefox/34.0"
+recv returned 0 (bug?)
+127.0.0.1 - - [2014-12-30T00:03:25+0000] GET /index.html 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/600.2.5 (KHTML, like Gecko) Version/8.0.2 Safari/600.2.5"
+127.0.0.1 - - [2014-12-30T00:03:27+0000] GET /Makefile 200 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:34.0) Gecko/20100101 Firefox/34.0"
+```
 ## License 
 
 Garçon is released under the [MIT License](LICENSE).
