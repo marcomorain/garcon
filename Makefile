@@ -2,7 +2,8 @@
 PREFIX ?= /usr/local
 TARGET = garcon
 LIBS = -lm
-CFLAGS = -std=c99 -Wall -Wextra # -Werror -Os
+CFLAGS = -D_GNU_SOURCE -std=gnu99 -Wall -Wextra # -Werror -Os
+LDFLAGS = -D_GNU_SOURCE -std=gnu99
 # CFLAGS = -D_POSIX_C_SOURCE=200112L -std=c99 -Wall -Wextra # -Werror -Os
 INC = -Ideps
 
@@ -11,7 +12,7 @@ INC = -Ideps
 default: $(TARGET)
 all: default
 
-OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c)) $(wildcard deps/*/*.c)
+OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c) $(wildcard deps/*/*.c))
 HEADERS = $(wildcard *.h)
 
 %.o: %.c $(HEADERS)
@@ -20,10 +21,11 @@ HEADERS = $(wildcard *.h)
 .PRECIOUS: $(TARGET) $(OBJECTS)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
+	$(CC) $(LDFLAGS) $(OBJECTS) -Wall $(LIBS) -o $@
 
 clean:
 	-rm -f *.o
+	-rm -f deps/*/*.o
 	-rm -f $(TARGET)
 
 install: $(TARGET)
