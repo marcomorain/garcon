@@ -189,6 +189,13 @@ static void send_file(
     buffer_t *buffer = buffer_new();
     buffer_append(buffer, root);
     buffer_append(buffer, request->uri);
+    // strip ?... from URI
+    if (strrchr(buffer_string(buffer), '?') != NULL) {
+	    buffer_t *old = buffer;
+	    buffer = buffer_slice(old, 0, strrchr(buffer_string(buffer), '?') - buffer_string(buffer));
+	    buffer_free(old);
+	    printf("new buffer content: %s\n", buffer_string(buffer));
+    }
     if (buffer_endswith_char(buffer, '/')) {
 	    buffer_append(buffer, "index.html");
     }
