@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#ifdef __linux__
+#include <sys/sendfile.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 #include <limits.h>
@@ -122,7 +125,7 @@ struct request {
   const struct tm* time;
 };
 
-static void log(int status, const struct request* request) {
+static void log_request(int status, const struct request* request) {
 
     char time_buffer[time_buffer_size];
     const size_t time_size = strftime(time_buffer,
@@ -167,7 +170,7 @@ static void send_error(int socket, int status, const struct request* request) {
 		fprintf(stderr, "Error -1 writing error message to socket");
 	}
 	buffer_free(buffer);
-  log(status, request);
+  log_request(status, request);
 }
 
 
@@ -204,7 +207,12 @@ static void send_file(
 
     off_t file_length = stat.st_size;
 
-    int result = sendfile(file, socket, 0, &file_length, 0, 0);
+#ifdef __linux__
+    off_t off = 0;
+    ssize_t result = sendfile(socket, file, &off, file_length);
+#else
+    ssize_t result = sendfile(file, socket, 0, &file_length, 0, 0);
+#endif
 
     if (file_length != stat.st_size) {
         printf("sendfile data length error\n");
@@ -214,7 +222,7 @@ static void send_file(
         perror("sendfile");
         return;
     }
-    log(200, request);
+    log_request(200, request);
    close(file);
 }
 
@@ -342,7 +350,7 @@ int main(int argc, char **argv)
 
         /* Start up / continue the parser. Note we pass recved==0 to
            signal that EOF has been received. */
-        const size_t nparsed = http_parser_execute(parser, &settings, buf, recved);
+        const ssize_t nparsed = http_parser_execute(parser, &settings, buf, recved);
 
         const int headers = 0;
 
@@ -350,7 +358,7 @@ int main(int argc, char **argv)
           puts("Headers");
           for (struct map_node_t* node = data.headers->head; node; node = node->next) {
             if (node->value) {
-                printf("%s: %s\n", node->key, node->value);
+                printf("%s: %s\n", node->key, (const char*)node->value);
             }
           }
         }
