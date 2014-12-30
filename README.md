@@ -21,4 +21,4 @@ Using garcon is simple – run `garcon` in a directory to make the contents avai
 
 ## License 
 
-Garçon is released under the [MIT License](http://www.opensource.org/licenses/MIT).
+Garçon is released under the [MIT License](LICENSE).
