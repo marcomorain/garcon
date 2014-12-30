@@ -180,15 +180,16 @@ static int buffer_endswith_char(buffer_t *self, char ch)
   return len > 0 && buffer_string(self)[len-1] == ch;
 }
 
-buffer_t *remove_query_string(buffer_t *path) {
-  const ssize_t pos = buffer_indexof(path, "?");
+void remove_query_string(buffer_t **path) {
+  const ssize_t pos = buffer_indexof(*path, "?");
 
-  printf("Content is %s %zd\n", buffer_string(path), pos);
-  if (pos > -1) {
-    path = buffer_slice(path, 0, pos);
-    printf("new buffer content: %s\n", buffer_string(path));
+  if (pos == -1) {
+    return;
   }
-  return path;
+
+  buffer_t *result = buffer_slice(*path, 0, pos);
+  buffer_free(*path);
+  *path = result;
 }
 
 static void send_file(
@@ -199,8 +200,7 @@ static void send_file(
   buffer_t *buffer = buffer_new();
   buffer_append(buffer, root);
   buffer_append(buffer, request->uri);
-
-  buffer = remove_query_string(buffer);
+  remove_query_string(&buffer);
   if (buffer_endswith_char(buffer, '/')) {
     buffer_append(buffer, "index.html");
   }
