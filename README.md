@@ -21,6 +21,9 @@ Using garcon is simple – run `garcon` in a directory to make the contents avai
     -p, --port [arg]              Which port to listen on (default 8888)
 ```
 
+## CORS
+Garçon adds the necessary headers to allow [CORS](http://en.wikipedia.org/wiki/Cross-origin_resource_sharing) requests to be accepted. These are `Access-Control-Allow-Methods: GET` `Access-Control-Allow-Origin: *`.
+
 ## Logging
 Requests are logged to `stdout` in Apache Combined Log Format, which looks like this:
 
