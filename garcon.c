@@ -25,6 +25,8 @@ enum {
   time_buffer_size = 100
 };
 
+const static char default_filename[] = "index.html";
+
 struct parser_data {
   buffer_t *url;
   char *client_address;
@@ -192,6 +194,26 @@ void remove_query_string(buffer_t **path) {
   *path = result;
 }
 
+// Return 1 if the given file descriptor
+// is a regular file, and 0 otherwise.
+static int is_regular_file(int fd, off_t *file_length) {
+  struct stat stat;
+  const int stat_res = fstat(fd, &stat);
+  assert(stat_res == 0);
+  *file_length = stat.st_size;
+  return S_ISREG(stat.st_mode);
+}
+
+static ssize_t send_file_to_socket(const int fd, const int socket, off_t length) {
+#ifdef __linux__
+  off_t off = 0;
+  return sendfile(socket, fd, &off, length);
+#else
+  return sendfile(fd, socket, 0, &length, 0, 0);
+#endif
+}
+
+
 static void send_file(
     int socket,
     const char *root,
@@ -202,45 +224,31 @@ static void send_file(
   buffer_append(buffer, request->uri);
   remove_query_string(&buffer);
   if (buffer_endswith_char(buffer, '/')) {
-    buffer_append(buffer, "index.html");
+    buffer_append(buffer, default_filename);
   }
 
   int file = open(buffer->data, O_RDONLY);
   if (file <= 0) {
-    //fprintf(stderr, "Cannot open %s\n", request->uri);
     send_error(socket, 404, request);
     return;
   }
   buffer_free(buffer);
-  struct stat stat;
-  int stat_res = fstat(file, &stat);
-  assert(stat_res == 0);
 
-  if (!S_ISREG(stat.st_mode)) {
+  off_t file_length;
+  if (!is_regular_file(file, &file_length)) {
     send_error(socket, 403, request);
     return;
   }
 
-  // TODO max age
-  buffer_t * headers = response_headers(stat.st_size, 0, request->time);
-
-  write(socket, headers->data, buffer_length(headers));
-
-  buffer_free(headers);
-
-  off_t file_length = stat.st_size;
-
-#ifdef __linux__
-  off_t off = 0;
-  ssize_t result = sendfile(socket, file, &off, file_length);
-#else
-  ssize_t result = sendfile(file, socket, 0, &file_length, 0, 0);
-#endif
-  close(file);
-
-  if (file_length != stat.st_size) {
-    printf("sendfile data length error\n");
+  // TODO set a max age header
+  {
+    buffer_t * headers = response_headers(file_length, 0, request->time);
+    write(socket, headers->data, buffer_length(headers));
+    buffer_free(headers);
   }
+
+  ssize_t result = send_file_to_socket(file, socket, file_length);
+  close(file);
 
   if (result == -1) {
     perror("sendfile");
