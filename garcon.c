@@ -338,13 +338,13 @@ int main(int argc, char **argv)
   settings.on_header_value = on_header_value;
   settings.on_header_field = on_header_field;
 
+  if (listen(socket, 10) < 0) {
+    perror("server: listen");
+    exit(EXIT_FAILURE);
+  }
+
   for(;;)
   {
-    if (listen(socket, 10) < 0) {
-      perror("server: listen");
-      exit(EXIT_FAILURE);
-    }
-
     struct sockaddr_in address;
     socklen_t addrlen;
     const int new_socket = accept(socket, (struct sockaddr *)&address, &addrlen);
