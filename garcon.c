@@ -236,6 +236,7 @@ static void send_file(
 #else
   ssize_t result = sendfile(file, socket, 0, &file_length, 0, 0);
 #endif
+  close(file);
 
   if (file_length != stat.st_size) {
     printf("sendfile data length error\n");
@@ -246,7 +247,6 @@ static void send_file(
     return;
   }
   log_request(200, request);
-  close(file);
 }
 
 int open_connection(int port)
