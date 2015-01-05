@@ -141,48 +141,42 @@ buffer_resize(buffer_t *self, size_t n) {
 }
 
 /*
- * Append or prepend a formatted string to the buffer.
+ * Append a printf-style formatted string to the buffer.
  */
-static int buffer_format_helper(buffer_t *self, const char* format, va_list ap,
-    int front) {
-  char *formatted;
-  int result, bytes_formatted;
-  bytes_formatted = vasprintf(&formatted, format, ap);
-  if (bytes_formatted < 0) {
+
+int buffer_appendf(buffer_t *self, const char *format, ...) {
+  va_list ap;
+  va_list tmpa;
+  char *dst = NULL;
+  int length = 0;
+  int required = 0;
+  int bytes = 0;
+
+  va_start(ap, format);
+
+  length = buffer_length(self);
+
+  // First, we compute how many bytes are needed
+  // for the formatted string and allocate that
+  // much more space in the buffer.
+  va_copy(tmpa, ap);
+  required = vsnprintf(NULL, 0, format, tmpa);
+  va_end(tmpa);
+  if (-1 == buffer_resize(self, length + required)) {
+    va_end(ap);
     return -1;
   }
 
-  if (front) {
-    result = buffer_prepend(self, formatted);
-  } else {
-    result = buffer_append(self, formatted);
-  }
-  free(formatted);
-  return result;
-}
-
-/*
- * Append a printf-style formatted string to the buffer.
- */
-int buffer_appendf(buffer_t *self, const char *format, ...) {
-  va_list ap;
-  va_start(ap, format);
-  const int ret = buffer_format_helper(self, format, ap, 0);
+  // Next format the string into the space that we
+  // have made room for.
+  dst = self->data + length;
+  bytes = vsnprintf(dst, 1 + required, format, ap);
   va_end(ap);
-  return ret;
-}
 
-/*
- * Prepend a printf-style formatted string to the buffer.
- */
-int buffer_prependf(buffer_t *self, const char *format, ...) {
-  va_list ap;
-  va_start(ap, format);
-  const int ret = buffer_format_helper(self, format, ap, 1);
-  va_end(ap);
-  return ret;
+  return bytes < 0
+    ? -1
+    : 0;
 }
-
 
 /*
  * Append `str` to `self` and return 0 on success, -1 on failure.
