@@ -35,7 +35,8 @@ struct parser_data {
   struct {
     buffer_t* key;
     buffer_t* val;
-  } header;
+  } header; // TODO: rename 'header_bufs'
+  int complete;
 };
 
 void parser_data_init(struct parser_data* data, const char* client_address) {
@@ -45,6 +46,7 @@ void parser_data_init(struct parser_data* data, const char* client_address) {
   map_set_free_func(data->headers, free);
   data->header.key = buffer_new();
   data->header.val = buffer_new();
+  data->complete = 0;
 
   // Log the current time
   time_t rawtime;
@@ -59,6 +61,12 @@ void parser_data_destroy(struct parser_data* data) {
   buffer_free(data->header.key);
   buffer_free(data->header.val);
   memset(&data, 0, sizeof(data));
+}
+
+static int on_message_complete(http_parser* parser) {
+  struct parser_data *data = parser->data;
+  data->complete = 1;
+  return 0;
 }
 
 static int on_header_field(http_parser * parser, const char *at, size_t len) {
@@ -134,7 +142,8 @@ static void log_request(int status, const struct request* request) {
       time_buffer_size, "%FT%T%z", request->time);
 
   if (time_size == 0) {
-    // TODO: long jump instead
+    // TODO: use longjmp back to the main loop rather than quitting
+    // the server
     fprintf(stderr, "Error formatting time");
     exit(EXIT_SUCCESS);
   }
@@ -176,8 +185,7 @@ static void send_error(int socket, int status, const struct request* request) {
 }
 
 
-static int buffer_endswith_char(buffer_t *self, char ch)
-{
+static int buffer_endswith_char(buffer_t *self, char ch) {
   size_t len = buffer_length(self);
   return len > 0 && buffer_string(self)[len-1] == ch;
 }
@@ -242,7 +250,7 @@ static void send_file(
 
   // TODO set a max age header
   {
-    buffer_t * headers = response_headers(file_length, 0, request->time);
+    buffer_t *headers = response_headers(file_length, 0, request->time);
     write(socket, headers->data, buffer_length(headers));
     buffer_free(headers);
   }
@@ -345,16 +353,20 @@ int main(int argc, char **argv)
   settings.on_url = on_url;
   settings.on_header_value = on_header_value;
   settings.on_header_field = on_header_field;
+  settings.on_message_complete = on_message_complete;
 
   if (listen(socket, 10) < 0) {
     perror("server: listen");
     exit(EXIT_FAILURE);
   }
 
-  for(;;)
-  {
     struct sockaddr_in address;
     socklen_t addrlen;
+
+http:
+  for(;;) {
+    //xkcd.com/292/
+
     const int new_socket = accept(socket, (struct sockaddr *)&address, &addrlen);
 
     if (new_socket <= 0) {
@@ -362,28 +374,46 @@ int main(int argc, char **argv)
       exit(EXIT_FAILURE);
     }
 
-    size_t len = 80 * 1024;
-    char buf[len];
-
-    const ssize_t recved = recv(new_socket, buf, len, 0);
-
-    if (recved < 0) {
-      fprintf(stderr, "Error recved = %zd\n", recved);
-      /* Handle error. */
-      continue;
-    }
     struct parser_data data;
     parser_data_init(&data, inet_ntoa(address.sin_addr));
 
-    http_parser *parser = malloc(sizeof(http_parser));
-    http_parser_init(parser, HTTP_REQUEST);
-    parser->data = &data;
+    // TODO: anything to free()?
+    http_parser parser;
+    http_parser_init(&parser, HTTP_REQUEST);
+    parser.data = &data;
 
-    /* Start up / continue the parser. Note we pass recved==0 to
-       signal that EOF has been received. */
-    const ssize_t nparsed = http_parser_execute(parser, &settings, buf, recved);
+    for (;;) {
 
-    const int headers = 0;
+      const int len = 1024;
+      char buf[len];
+
+      // Read data from the socket
+      const ssize_t recved = recv(new_socket, buf, len, 0);
+
+      if (recved == 0) {
+        break;
+      }
+
+      if (recved == -1) {
+        perror("Error reading request from network");
+        goto http;
+      }
+      // Start up / continue the parser. Note we pass recved==0 to
+      // signal that EOF has been received.
+      const ssize_t nparsed = http_parser_execute(&parser, &settings, buf, recved);
+
+      if (nparsed != recved) {
+        fprintf(stderr, "Error parsing HTTP header\n");
+        goto http;
+      }
+
+      if (data.complete || http_body_is_final(&parser)) {
+        break;
+      }
+    }
+
+
+     const int headers = 0;
 
     if (headers) {
       puts("Headers");
@@ -399,24 +429,21 @@ int main(int argc, char **argv)
     request.client_address = data.client_address;
     request.time = &data.timeinfo;
     request.uri = data.url->data;
-    request.method = http_method_str(parser->method);
+    request.method = http_method_str(parser.method);
 
-    if (recved == 0) {
-      fputs("recv returned 0 (bug?)\n", stderr);
-    } else if ((nparsed != recved) || parser->http_errno) {
+    if (parser.http_errno) {
       request.user_agent = "";
       request.method = "";
       request.uri = "BAD REQUEST";
       send_error(new_socket, 400, &request);
-    } else if (parser->method != HTTP_GET) {
+    } else if (parser.method != HTTP_GET) {
       send_error(new_socket, 405, &request);
-    } else if (parser->upgrade) {
+    } else if (parser.upgrade) {
       /* handle new protocol */
     } else {
       send_file(new_socket, options.root, &request);
     }
     parser_data_destroy(&data);
-    free(parser);
     shutdown(new_socket, SHUT_RDWR);
     close(new_socket);
   }
