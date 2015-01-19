@@ -1,5 +1,7 @@
 # garçon
 
+[![Circle CI](https://circleci.com/gh/marcomorain/garcon.svg?style=svg)](https://circleci.com/gh/marcomorain/garcon)
+
 Garçon is a local HTTP fileserver. It is designed to make it simple to serve the files in a local directory over HTTP. Garçon is intended to be used for local development, and should is not intended to replace the nginx or apache webservers.
 
 I use garcon in place of having to configure `nginx` to serve a local folder when doing web development. Garcon does the same job as running `python -m SimpleHTTPServer 8888`
@@ -38,6 +40,6 @@ Garçon! Serving content from /Users/marc/dev/garcon on port 8888
 127.0.0.1 - - [2014-12-30T00:03:20+0000] GET /favicon.ico 404 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:34.0) Gecko/20100101 Firefox/34.0"
 127.0.0.1 - - [2014-12-30T00:03:27+0000] GET /Makefile 200 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:34.0) Gecko/20100101 Firefox/34.0"
 ```
-## License 
+## License
 
 Garçon is released under the [MIT License](LICENSE).
