@@ -344,7 +344,7 @@ int main(int argc, char **argv)
   command_option(&cmd, "-p", "--port [arg]", "Which port to listen on (default 8888)", set_port);
   command_parse(&cmd, argc, argv);
 
-  printf("Garçon! Serving content from %s on port %ld\n", options.root, options.port);
+  printf("Garçon! Serving content from %s on http://localhost:%ld/\n", options.root, options.port);
 
   const int socket = open_connection(options.port);
 
