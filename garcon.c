@@ -25,7 +25,7 @@ enum {
   time_buffer_size = 100
 };
 
-const static char default_filename[] = "index.html";
+static const char default_filename[] = "index.html";
 
 struct parser_data {
   buffer_t *url;
