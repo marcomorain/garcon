@@ -94,7 +94,40 @@ static int on_url(http_parser * parser, const char *at, size_t len) {
   return 0;
 }
 
-static buffer_t* response_headers(int length, int max_age, const struct tm *timeinfo)
+struct mime_type_t { const char* ext; const char* mime; } mime_types[] = {
+  { ".htm", "text/html" },
+  { ".html", "text/html" },
+  { ".js", "text/javascript" },
+  { ".css", "text/css" },
+  { ".svg", "image/svg+xml" },
+  { ".jpg", "image/jpeg" },
+  { ".jpeg", "image/jpeg" },
+  { ".png", "image/png" },
+  { ".gif", "image/gif" },
+  { ".pdf", "application/pdf" },
+  { ".xml", "text/xml" },
+  { ".md", "text/markdown" },
+  { ".csv", "text/csv" },
+  { ".mp3", "audio/mpeg" },
+  { ".zip", "application/zip" },
+  { ".gz", "application/gzip" },
+  { ".xhtml", "application/xhtml+xml" }
+};
+
+static void buffer_set_content_type(buffer_t* buffer, const char* uri)
+{
+  size_t i;
+  const char* ext = strrchr(uri, '.');
+  if (ext == NULL)
+	  return;
+  for (i = 0; i < sizeof(mime_types)/sizeof(mime_types[0]); ++i)
+    if (strcasecmp(ext + 1, mime_types[i].ext + 1) == 0) {
+      buffer_appendf(buffer, "Content-Type: %s\r\n", mime_types[i].mime);
+      break;
+    }
+}
+
+static buffer_t* response_headers(int length, int max_age, const struct tm *timeinfo, const char* uri)
 {
   buffer_t *result = buffer_new();
   buffer_append(result, "HTTP/1.1 200 OK\r\n");
@@ -118,6 +151,9 @@ static buffer_t* response_headers(int length, int max_age, const struct tm *time
   buffer_appendf(result, "cache-control: public, max-age=%d\r\n", max_age);
 
   // Content - Length:459211
+
+  buffer_set_content_type(result, uri);
+
   buffer_appendf(result, "Content-Length: %d\r\n", length);
   buffer_append(result, "Access-Control-Allow-Methods: GET\r\n");
   buffer_append(result, "Access-Control-Allow-Origin: *\r\n");
@@ -168,7 +204,7 @@ static void send_error(int socket, int status, const struct request* request) {
 
   int age = 0;
 
-  buffer_t* headers = response_headers(buffer_length(buffer), age, request->time);
+  buffer_t* headers = response_headers(buffer_length(buffer), age, request->time, request->uri);
   int header_bytes_written = write(socket, headers->data, buffer_length(headers));
   buffer_free(headers);
 
@@ -183,7 +219,6 @@ static void send_error(int socket, int status, const struct request* request) {
   buffer_free(buffer);
   log_request(status, request);
 }
-
 
 static int buffer_endswith_char(buffer_t *self, char ch) {
   size_t len = buffer_length(self);
@@ -250,7 +285,7 @@ static void send_file(
 
   // TODO set a max age header
   {
-    buffer_t *headers = response_headers(file_length, 0, request->time);
+    buffer_t *headers = response_headers(file_length, 0, request->time, request->uri);
     write(socket, headers->data, buffer_length(headers));
     buffer_free(headers);
   }
