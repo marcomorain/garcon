@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,34 +95,36 @@ static int on_url(http_parser * parser, const char *at, size_t len) {
   return 0;
 }
 
-struct mime_type_t { const char* ext; const char* mime; } mime_types[] = {
-  { ".htm", "text/html" },
-  { ".html", "text/html" },
-  { ".js", "text/javascript" },
-  { ".css", "text/css" },
-  { ".svg", "image/svg+xml" },
-  { ".jpg", "image/jpeg" },
-  { ".jpeg", "image/jpeg" },
-  { ".png", "image/png" },
-  { ".gif", "image/gif" },
-  { ".pdf", "application/pdf" },
-  { ".xml", "text/xml" },
-  { ".md", "text/markdown" },
-  { ".csv", "text/csv" },
-  { ".mp3", "audio/mpeg" },
-  { ".zip", "application/zip" },
-  { ".gz", "application/gzip" },
-  { ".xhtml", "application/xhtml+xml" }
+const struct { const char* ext; const char* mime; } mime_types[] = {
+  { "htm",   "text/html" },
+  { "html",  "text/html" },
+  { "js",    "text/javascript" },
+  { "css",   "text/css" },
+  { "svg",   "image/svg+xml" },
+  { "jpg",   "image/jpeg" },
+  { "jpeg",  "image/jpeg" },
+  { "png",   "image/png" },
+  { "gif",   "image/gif" },
+  { "pdf",   "application/pdf" },
+  { "xml",   "text/xml" },
+  { "md",    "text/markdown" },
+  { "csv",   "text/csv" },
+  { "mp3",   "audio/mpeg" },
+  { "zip",   "application/zip" },
+  { "gz",    "application/gzip" },
+  { "xhtml", "application/xhtml+xml" }
 };
 
-static void buffer_set_content_type(buffer_t* buffer, const char* uri)
+static void response_set_content_type(buffer_t* buffer, const char* uri)
 {
   size_t i;
   const char* ext = strrchr(uri, '.');
   if (ext == NULL)
 	  return;
+
+  ext++;
   for (i = 0; i < sizeof(mime_types)/sizeof(mime_types[0]); ++i)
-    if (strcasecmp(ext + 1, mime_types[i].ext + 1) == 0) {
+    if (strcasecmp(ext, mime_types[i].ext) == 0) {
       buffer_appendf(buffer, "Content-Type: %s\r\n", mime_types[i].mime);
       break;
     }
@@ -145,14 +148,13 @@ static buffer_t* response_headers(int length, int max_age, const struct tm *time
 
   // TODO:
   // Last-Modified: Sun, 07 Sep 2014 01: 37:26 GMT
-  // Content-Type:image / gif
 
   max_age = 31536000;
   buffer_appendf(result, "cache-control: public, max-age=%d\r\n", max_age);
 
   // Content - Length:459211
 
-  buffer_set_content_type(result, uri);
+  response_set_content_type(result, uri);
 
   buffer_appendf(result, "Content-Length: %d\r\n", length);
   buffer_append(result, "Access-Control-Allow-Methods: GET\r\n");
@@ -378,6 +380,8 @@ int main(int argc, char **argv)
   command_option(&cmd, "-d", "--directory [arg]", "The root directory to serve files from (default to the current working directory)", set_root);
   command_option(&cmd, "-p", "--port [arg]", "Which port to listen on (default 8888)", set_port);
   command_parse(&cmd, argc, argv);
+
+  signal(SIGPIPE, SIG_IGN);
 
   printf("Garçon! Serving content from %s on http://localhost:%ld/\n", options.root, options.port);
 
