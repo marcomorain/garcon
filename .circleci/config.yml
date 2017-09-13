@@ -5,6 +5,7 @@ jobs:
       - image: gcc:7
     steps:
       - checkout
+      - run: echo 1
       - run:
           name: Build Project
           command: make
