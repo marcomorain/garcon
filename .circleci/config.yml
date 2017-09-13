@@ -1,0 +1,10 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: gcc:7
+    steps:
+      - checkout
+      - run:
+          name: Build Project
+          command: make
